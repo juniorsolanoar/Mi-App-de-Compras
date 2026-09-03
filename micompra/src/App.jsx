@@ -26,6 +26,8 @@ function App() {
 	const [listName, setListName] = useState("");
 	const [listDate, setListDate] = useState(getTodayDate());
 
+	const [listBudget, setListBudget] = useState("");
+
 	const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
 	const [productName, setProductName] = useState("");
@@ -40,6 +42,8 @@ function App() {
 
 	const [openProductMenuId, setOpenProductMenuId] = useState(null);
 	const [editingProductId, setEditingProductId] = useState(null);
+
+	const [activeView, setActiveView] = useState("lists");
 
 	useEffect(() => {
 		localStorage.setItem("micompra-lists", JSON.stringify(lists));
@@ -212,6 +216,83 @@ function App() {
 		);
 	}
 
+	function completeShoppingList() {
+		if (!selectedList) {
+			return;
+		}
+
+		const pendingProducts = selectedProducts.filter(
+			(product) => !product.purchased,
+		);
+
+		if (pendingProducts.length > 0) {
+			const confirmed = window.confirm(
+				`Todavía hay ${pendingProducts.length} productos pendientes. ¿Deseas finalizar la compra de todos modos?`,
+			);
+
+			if (!confirmed) {
+				return;
+			}
+		}
+
+		const withoutActualPrice = selectedProducts.filter(
+			(product) =>
+				product.purchased &&
+				(product.actualPrice === null ||
+					product.actualPrice === undefined),
+		);
+
+		if (withoutActualPrice.length > 0) {
+			const confirmed = window.confirm(
+				`Hay ${withoutActualPrice.length} productos comprados sin precio real. ¿Deseas finalizar la compra de todos modos?`,
+			);
+
+			if (!confirmed) {
+				return;
+			}
+		}
+
+		setLists((currentLists) =>
+			currentLists.map((list) =>
+				list.id === selectedListId
+					? {
+							...list,
+							completedAt: new Date().toISOString(),
+						}
+					: list,
+			),
+		);
+
+		setIsShoppingMode(false);
+	}
+
+	function reopenShoppingList() {
+		if (!selectedList?.completedAt) {
+			return;
+		}
+
+		const confirmed = window.confirm(
+			"¿Deseas reabrir esta compra? Volverá a aparecer entre tus listas activas.",
+		);
+
+		if (!confirmed) {
+			return;
+		}
+
+		setLists((currentLists) =>
+			currentLists.map((list) =>
+				list.id === selectedListId
+					? {
+							...list,
+							completedAt: null,
+						}
+					: list,
+			),
+		);
+
+		setIsDetailMenuOpen(false);
+	}
+
 	function updateActualPrice(productId, value) {
 		setLists((currentLists) =>
 			currentLists.map((list) => {
@@ -250,6 +331,7 @@ function App() {
 	function openNewListModal() {
 		setListName("");
 		setListDate(getTodayDate());
+		setListBudget("");
 		setIsModalOpen(true);
 	}
 
@@ -268,7 +350,10 @@ function App() {
 			id: Date.now(),
 			name: listName.trim(),
 			date: listDate,
-			budget: null,
+
+			budget:
+				listBudget !== "" ? Math.max(Number(listBudget) || 0, 0) : null,
+
 			products: [],
 		};
 
@@ -276,6 +361,7 @@ function App() {
 
 		setListName("");
 		setListDate(getTodayDate());
+		setListBudget("");
 		setIsModalOpen(false);
 	}
 
@@ -324,13 +410,23 @@ function App() {
 	function duplicateList(list) {
 		const duplicatedList = {
 			...list,
+
 			id: Date.now(),
 			name: `${list.name} - Copia`,
 			date: getTodayDate(),
+
+			completedAt: null,
+
 			products: (list.products || []).map((product, index) => ({
 				...product,
+
 				id: Date.now() + index + 1,
+
 				purchased: false,
+
+				price: product.actualPrice ?? product.price ?? 0,
+
+				actualPrice: null,
 			})),
 		};
 
@@ -376,27 +472,61 @@ function App() {
 	}
 	const selectedList = lists.find((list) => list.id === selectedListId);
 
+	const isSelectedListCompleted = Boolean(selectedList?.completedAt);
+
 	const selectedProducts = selectedList?.products || [];
+
+	const displayedProducts = isShoppingMode
+		? [...selectedProducts].sort((a, b) => {
+				if (a.purchased === b.purchased) {
+					return 0;
+				}
+
+				return a.purchased ? 1 : -1;
+			})
+		: selectedProducts;
+
+	const firstPurchasedIndex = displayedProducts.findIndex(
+		(product) => product.purchased,
+	);
 
 	const purchasedCount = selectedProducts.filter(
 		(product) => product.purchased,
 	).length;
 
 	const estimatedTotal = selectedProducts.reduce(
-		(sum, product) => sum + product.quantity * (product.price || 0),
-		0,
-	);
-
-	const actualTotal = selectedProducts.reduce(
 		(sum, product) =>
-			sum +
-			product.quantity * (product.actualPrice ?? product.price ?? 0),
+			sum + (Number(product.quantity) || 0) * (product.price || 0),
 		0,
 	);
 
-	const totalDifference = actualTotal - estimatedTotal;
+	const projectedTotal = selectedProducts.reduce((sum, product) => {
+		const effectivePrice = product.actualPrice ?? product.price ?? 0;
 
-	const totalAmount = actualTotal;
+		return sum + (Number(product.quantity) || 0) * effectivePrice;
+	}, 0);
+
+	const actualPaidTotal = selectedProducts.reduce((sum, product) => {
+		if (
+			!product.purchased ||
+			product.actualPrice === null ||
+			product.actualPrice === undefined
+		) {
+			return sum;
+		}
+
+		return sum + (Number(product.quantity) || 0) * product.actualPrice;
+	}, 0);
+
+	const purchasedWithoutActualPrice = selectedProducts.filter(
+		(product) =>
+			product.purchased &&
+			(product.actualPrice === null || product.actualPrice === undefined),
+	).length;
+
+	const totalDifference = projectedTotal - estimatedTotal;
+
+	const totalAmount = projectedTotal;
 
 	const selectedBudget = selectedList?.budget ?? null;
 
@@ -436,15 +566,13 @@ function App() {
 		return total + listTotal;
 	}, 0);
 
-	const activeListsCount = lists.filter((list) => {
-		const products = list.products || [];
+	const activeLists = lists.filter((list) => !list.completedAt);
 
-		if (products.length === 0) {
-			return true;
-		}
+	const activeListsCount = activeLists.length;
 
-		return products.some((product) => !product.purchased);
-	}).length;
+	const completedLists = lists
+		.filter((list) => Boolean(list.completedAt))
+		.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
 
 	if (selectedList) {
 		return (
@@ -457,6 +585,12 @@ function App() {
 								setSelectedListId(null);
 								setIsDetailMenuOpen(false);
 								setIsShoppingMode(false);
+
+								if (selectedList.completedAt) {
+									setActiveView("history");
+								} else {
+									setActiveView("lists");
+								}
 							}}
 							aria-label="Volver"
 						>
@@ -468,18 +602,20 @@ function App() {
 							<h1>{selectedList.name}</h1>
 						</div>
 
-						<button
-							className={`shopping-mode-button ${
-								isShoppingMode ? "active" : ""
-							}`}
-							onClick={() =>
-								setIsShoppingMode((current) => !current)
-							}
-						>
-							{isShoppingMode
-								? "✓ Modo compra"
-								: "🛒 Modo compra"}
-						</button>
+						{!isSelectedListCompleted && (
+							<button
+								className={`shopping-mode-button ${
+									isShoppingMode ? "active" : ""
+								}`}
+								onClick={() =>
+									setIsShoppingMode((current) => !current)
+								}
+							>
+								{isShoppingMode
+									? "✓ Modo compra"
+									: "🛒 Modo compra"}
+							</button>
+						)}
 
 						<div className="detail-menu-wrapper">
 							<button
@@ -494,14 +630,20 @@ function App() {
 
 							{isDetailMenuOpen && (
 								<div className="list-menu detail-menu">
-									<button
-										onClick={() => {
-											openEditList(selectedList);
-											setIsDetailMenuOpen(false);
-										}}
-									>
-										✏️ Editar lista
-									</button>
+									{isSelectedListCompleted ? (
+										<button onClick={reopenShoppingList}>
+											↩️ Reabrir compra
+										</button>
+									) : (
+										<button
+											onClick={() => {
+												openEditList(selectedList);
+												setIsDetailMenuOpen(false);
+											}}
+										>
+											✏️ Editar lista
+										</button>
+									)}
 
 									<button
 										onClick={() => {
@@ -542,9 +684,15 @@ function App() {
 						</div>
 
 						<div>
-							<span>Real</span>
+							<span>Proyección</span>
 
-							<strong>{formatCurrency(actualTotal)}</strong>
+							<strong>{formatCurrency(projectedTotal)}</strong>
+						</div>
+
+						<div>
+							<span>Pagado real</span>
+
+							<strong>{formatCurrency(actualPaidTotal)}</strong>
 						</div>
 
 						<div
@@ -597,6 +745,18 @@ function App() {
 						)}
 					</section>
 
+					{purchasedWithoutActualPrice > 0 && (
+						<div className="price-warning">
+							<span>⚠️</span>
+
+							<p>
+								{purchasedWithoutActualPrice === 1
+									? "Hay 1 producto comprado sin precio real."
+									: `Hay ${purchasedWithoutActualPrice} productos comprados sin precio real.`}
+							</p>
+						</div>
+					)}
+
 					{selectedBudget !== null && (
 						<section className="budget-progress-card">
 							<div className="budget-progress-header">
@@ -634,6 +794,41 @@ function App() {
 						</section>
 					)}
 
+					{!isSelectedListCompleted ? (
+						<section className="complete-shopping-card">
+							<div>
+								<span>¿Terminaste tu compra?</span>
+
+								<p>
+									Al finalizarla quedará disponible en tu
+									historial.
+								</p>
+							</div>
+
+							<button
+								className="complete-shopping-button"
+								onClick={completeShoppingList}
+							>
+								✓ Finalizar compra
+							</button>
+						</section>
+					) : (
+						<section className="completed-shopping-card">
+							<div>
+								<span>✓ Compra finalizada · Solo lectura</span>
+
+								<strong>
+									{new Intl.DateTimeFormat("es-CR", {
+										dateStyle: "medium",
+										timeStyle: "short",
+									}).format(
+										new Date(selectedList.completedAt),
+									)}
+								</strong>
+							</div>
+						</section>
+					)}
+
 					<section
 						className={`products-section ${
 							isShoppingMode ? "shopping-mode" : ""
@@ -661,16 +856,23 @@ function App() {
 								<div className="products-header">
 									<h2>Productos</h2>
 
-									<button
-										className="small-add-button"
-										onClick={openProductModal}
-									>
-										+ Agregar
-									</button>
+									{!isSelectedListCompleted && (
+										<button
+											className="small-add-button"
+											onClick={openProductModal}
+										>
+											+ Agregar
+										</button>
+									)}
 								</div>
 
 								<div className="products-list">
-									{selectedProducts.map((product) => {
+									{displayedProducts.map((product, index) => {
+										const showPurchasedDivider =
+											isShoppingMode &&
+											index === firstPurchasedIndex &&
+											firstPurchasedIndex > 0;
+
 										const estimatedProductTotal =
 											product.quantity *
 											(product.price || 0);
@@ -685,171 +887,199 @@ function App() {
 											effectiveUnitPrice;
 
 										return (
-											<article
-												className={`product-card ${
-													product.purchased
-														? "purchased"
-														: ""
-												} ${isShoppingMode ? "shopping-product-card" : ""}`}
+											<div
+												className="shopping-product-wrapper"
 												key={product.id}
 											>
-												<div className="product-main">
-													<button
-														className={`purchase-check ${
-															product.purchased
-																? "checked"
-																: ""
-														} ${isShoppingMode ? "shopping-check" : ""}`}
-														onClick={() =>
-															togglePurchased(
-																product.id,
-															)
-														}
-														aria-label={
-															product.purchased
-																? "Marcar como pendiente"
-																: "Marcar como comprado"
-														}
-													>
-														{product.purchased
-															? "✓"
-															: ""}
-													</button>
+												{showPurchasedDivider && (
+													<div className="purchased-divider">
+														<span>Comprados</span>
+													</div>
+												)}
 
-													<div className="product-info">
-														<span className="product-category">
-															{product.category}
-														</span>
+												<article
+													className={`product-card ${
+														product.purchased
+															? "purchased"
+															: ""
+													} ${
+														isShoppingMode
+															? "shopping-product-card"
+															: ""
+													}`}
+												>
+													<div className="product-main">
+														<button
+															className={`purchase-check ${
+																product.purchased
+																	? "checked"
+																	: ""
+															} ${isShoppingMode ? "shopping-check" : ""}`}
+															onClick={() =>
+																togglePurchased(
+																	product.id,
+																)
+															}
+															disabled={
+																isSelectedListCompleted
+															}
+															aria-label={
+																product.purchased
+																	? "Marcar como pendiente"
+																	: "Marcar como comprado"
+															}
+														>
+															{product.purchased
+																? "✓"
+																: ""}
+														</button>
 
-														<h3>{product.name}</h3>
-
-														<p>
-															{product.quantity}{" "}
-															{product.unit}
-														</p>
-
-														<div className="product-prices">
-															<span>
-																Est.{" "}
-																{formatCurrency(
-																	product.price ||
-																		0,
-																)}
+														<div className="product-info">
+															<span className="product-category">
+																{
+																	product.category
+																}
 															</span>
 
-															{product.actualPrice !==
-																null &&
-																product.actualPrice !==
-																	undefined && (
-																	<span className="actual-price">
-																		Real{" "}
-																		{formatCurrency(
-																			product.actualPrice,
-																		)}
-																	</span>
-																)}
-														</div>
-														{isShoppingMode && (
-															<div className="shopping-price-editor">
-																<label
-																	htmlFor={`actual-price-${product.id}`}
-																>
-																	Precio real
-																</label>
+															<h3>
+																{product.name}
+															</h3>
 
-																<div className="shopping-price-input">
-																	<span>
-																		₡
-																	</span>
+															<p>
+																{
+																	product.quantity
+																}{" "}
+																{product.unit}
+															</p>
 
-																	<input
-																		id={`actual-price-${product.id}`}
-																		type="number"
-																		min="0"
-																		step="1"
-																		inputMode="numeric"
-																		placeholder="0"
-																		value={
-																			product.actualPrice ??
-																			""
-																		}
-																		onChange={(
-																			event,
-																		) =>
-																			updateActualPrice(
-																				product.id,
-																				event
-																					.target
-																					.value,
-																			)
-																		}
-																	/>
-																</div>
+															<div className="product-prices">
+																<span>
+																	Est.{" "}
+																	{formatCurrency(
+																		product.price ||
+																			0,
+																	)}
+																</span>
+
+																{product.actualPrice !==
+																	null &&
+																	product.actualPrice !==
+																		undefined && (
+																		<span className="actual-price">
+																			Real{" "}
+																			{formatCurrency(
+																				product.actualPrice,
+																			)}
+																		</span>
+																	)}
 															</div>
-														)}
-													</div>
+															{isShoppingMode && (
+																<div className="shopping-price-editor">
+																	<label
+																		htmlFor={`actual-price-${product.id}`}
+																	>
+																		Precio
+																		real
+																	</label>
 
-													<div className="product-actions">
-														<div className="product-total">
-															<span>Total</span>
+																	<div className="shopping-price-input">
+																		<span>
+																			₡
+																		</span>
 
-															<strong>
-																{formatCurrency(
-																	actualProductTotal,
-																)}
-															</strong>
+																		<input
+																			id={`actual-price-${product.id}`}
+																			type="number"
+																			min="0"
+																			step="1"
+																			inputMode="numeric"
+																			placeholder="0"
+																			value={
+																				product.actualPrice ??
+																				""
+																			}
+																			onChange={(
+																				event,
+																			) =>
+																				updateActualPrice(
+																					product.id,
+																					event
+																						.target
+																						.value,
+																				)
+																			}
+																		/>
+																	</div>
+																</div>
+															)}
 														</div>
 
-														<div className="product-menu-wrapper">
-															<button
-																className="product-menu-button"
-																aria-label="Opciones de producto"
-																onClick={() =>
-																	setOpenProductMenuId(
-																		(
-																			currentId,
-																		) =>
-																			currentId ===
-																			product.id
-																				? null
-																				: product.id,
-																	)
-																}
-															>
-																⋮
-															</button>
+														<div className="product-actions">
+															<div className="product-total">
+																<span>
+																	Total
+																</span>
 
-															{openProductMenuId ===
-																product.id && (
-																<div className="product-menu">
+																<strong>
+																	{formatCurrency(
+																		actualProductTotal,
+																	)}
+																</strong>
+															</div>
+
+															{!isSelectedListCompleted && (
+																<div className="product-menu-wrapper">
 																	<button
+																		className="product-menu-button"
+																		aria-label="Opciones de producto"
 																		onClick={() =>
-																			openEditProduct(
-																				product,
+																			setOpenProductMenuId(
+																				(
+																					currentId,
+																				) =>
+																					currentId ===
+																					product.id
+																						? null
+																						: product.id,
 																			)
 																		}
 																	>
-																		✏️
-																		Editar
+																		⋮
 																	</button>
 
-																	<button
-																		className="danger-menu-item"
-																		onClick={() =>
-																			deleteProduct(
-																				product.id,
-																			)
-																		}
-																	>
-																		🗑️
-																		Eliminar
-																	</button>
+																	{openProductMenuId ===
+																		product.id && (
+																		<div className="product-menu">
+																			<button
+																				onClick={() =>
+																					openEditProduct(
+																						product,
+																					)
+																				}
+																			>
+																				✏️
+																				Editar
+																			</button>
+
+																			<button
+																				className="danger-menu-item"
+																				onClick={() =>
+																					deleteProduct(
+																						product.id,
+																					)
+																				}
+																			>
+																				🗑️
+																				Eliminar
+																			</button>
+																		</div>
+																	)}
 																</div>
 															)}
 														</div>
 													</div>
-												</div>
-											</article>
+												</article>
+											</div>
 										);
 									})}
 								</div>
@@ -1214,6 +1444,150 @@ function App() {
 		);
 	}
 
+	if (activeView === "history") {
+		return (
+			<main className="app">
+				<header className="header">
+					<div>
+						<span className="eyebrow">COMPRAS FINALIZADAS</span>
+
+						<h1>Historial</h1>
+					</div>
+				</header>
+
+				<section className="history-summary">
+					<span>Compras registradas</span>
+
+					<strong>{completedLists.length}</strong>
+				</section>
+
+				<section className="history-section">
+					{completedLists.length === 0 ? (
+						<div className="empty-state">
+							<div className="empty-icon">🕘</div>
+
+							<h3>Aún no tienes historial</h3>
+
+							<p>Cuando finalices una compra aparecerá aquí.</p>
+						</div>
+					) : (
+						<div className="history-list">
+							{completedLists.map((list) => {
+								const products = list.products || [];
+
+								const actualSpent = products.reduce(
+									(sum, product) => {
+										if (!product.purchased) {
+											return sum;
+										}
+
+										if (
+											product.actualPrice === null ||
+											product.actualPrice === undefined
+										) {
+											return sum;
+										}
+
+										return (
+											sum +
+											(Number(product.quantity) || 0) *
+												product.actualPrice
+										);
+									},
+									0,
+								);
+
+								const purchasedProducts = products.filter(
+									(product) => product.purchased,
+								).length;
+
+								return (
+									<article
+										className="history-card"
+										key={list.id}
+										onClick={() =>
+											setSelectedListId(list.id)
+										}
+									>
+										<div className="history-card-top">
+											<div>
+												<span className="history-date">
+													{new Intl.DateTimeFormat(
+														"es-CR",
+														{
+															day: "numeric",
+															month: "short",
+															year: "numeric",
+														},
+													).format(
+														new Date(
+															list.completedAt,
+														),
+													)}
+												</span>
+
+												<h3>{list.name}</h3>
+											</div>
+
+											<span className="history-arrow">
+												›
+											</span>
+										</div>
+
+										<div className="history-card-footer">
+											<div>
+												<span>Productos</span>
+
+												<strong>
+													{purchasedProducts}
+												</strong>
+											</div>
+
+											<div>
+												<span>Pagado real</span>
+
+												<strong>
+													{formatCurrency(
+														actualSpent,
+													)}
+												</strong>
+											</div>
+										</div>
+									</article>
+								);
+							})}
+						</div>
+					)}
+				</section>
+
+				<nav className="bottom-navigation">
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("lists")}
+					>
+						<span>🛒</span>
+						Listas
+					</button>
+
+					<button className="nav-item active">
+						<span>🕘</span>
+						Historial
+					</button>
+
+					<button className="nav-item">
+						<span>📊</span>
+						Estadísticas
+					</button>
+
+					<button className="nav-item">
+						<span>⚙️</span>
+						Ajustes
+					</button>
+				</nav>
+			</main>
+		);
+	}
+
 	return (
 		<main className="app">
 			<header className="header">
@@ -1260,7 +1634,7 @@ function App() {
 					)}
 				</div>
 
-				{lists.length === 0 ? (
+				{activeLists.length === 0 ? (
 					<div className="empty-state">
 						<div className="empty-icon">🛒</div>
 
@@ -1280,7 +1654,7 @@ function App() {
 					</div>
 				) : (
 					<div className="lists-grid">
-						{lists.map((list) => {
+						{activeLists.map((list) => {
 							const products = list.products || [];
 
 							const purchased = products.filter(
@@ -1305,8 +1679,7 @@ function App() {
 										)
 									: 0;
 
-							const isCompleted =
-								products.length > 0 && progress === 100;
+							const isCompleted = Boolean(list.completedAt);
 
 							return (
 								<article
@@ -1429,12 +1802,18 @@ function App() {
 			</section>
 
 			<nav className="bottom-navigation">
-				<button className="nav-item active">
+				<button
+					className="nav-item active"
+					onClick={() => setActiveView("lists")}
+				>
 					<span>🛒</span>
 					Listas
 				</button>
 
-				<button className="nav-item">
+				<button
+					className="nav-item"
+					onClick={() => setActiveView("history")}
+				>
 					<span>🕘</span>
 					Historial
 				</button>
@@ -1505,6 +1884,27 @@ function App() {
 									Usamos la fecha actual por defecto, pero
 									puedes cambiarla.
 								</small>
+							</div>
+
+							<div className="form-group">
+								<label htmlFor="list-budget">Presupuesto</label>
+
+								<input
+									id="list-budget"
+									type="number"
+									min="0"
+									step="1"
+									inputMode="numeric"
+									placeholder="Ej. 50000"
+									value={listBudget}
+									onChange={(event) =>
+										setListBudget(event.target.value)
+									}
+								/>
+
+								<span className="form-help">
+									Opcional. Puedes modificarlo después.
+								</span>
 							</div>
 
 							<div className="modal-actions">
