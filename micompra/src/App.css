@@ -984,3 +984,266 @@
 .budget-status.over-budget span {
 	color: #ff7b72;
 }
+
+/* BARRA DE PRESUPUESTO */
+
+.budget-progress-card {
+	margin-top: 14px;
+	padding: 16px;
+
+	border: 1px solid #30363d;
+	border-radius: 16px;
+
+	background: #161b22;
+}
+
+.budget-progress-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+
+	margin-bottom: 10px;
+}
+
+.budget-progress-header span {
+	color: #8b949e;
+	font-size: 12px;
+}
+
+.budget-progress-header strong {
+	color: #f0f6fc;
+	font-size: 13px;
+}
+
+.budget-progress-track {
+	width: 100%;
+	height: 8px;
+
+	overflow: hidden;
+
+	border-radius: 999px;
+
+	background: #21262d;
+}
+
+.budget-progress-bar {
+	height: 100%;
+
+	border-radius: inherit;
+
+	background: #3ddc84;
+
+	transition: width 0.25s ease;
+}
+
+.budget-progress-bar.over-budget {
+	background: #ff7b72;
+}
+
+.budget-progress-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+
+	margin-top: 8px;
+
+	color: #8b949e;
+	font-size: 11px;
+}
+
+/* PRECIOS ESTIMADOS Y REALES */
+
+.product-prices {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.product-prices span {
+	padding: 3px 7px;
+
+	border-radius: 999px;
+
+	background: #21262d;
+	color: #8b949e;
+
+	font-size: 10px;
+}
+
+.product-prices .actual-price {
+	background: rgba(61, 220, 132, 0.1);
+	color: #3ddc84;
+}
+
+.product-total {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 2px;
+}
+
+.product-total span {
+	color: #8b949e;
+	font-size: 9px;
+	text-transform: uppercase;
+}
+
+.product-total strong {
+	font-size: 15px;
+}
+
+.difference-status.over strong {
+	color: #ff7b72;
+}
+
+.difference-status.under strong {
+	color: #3ddc84;
+}
+
+.difference-status.under span {
+	color: #3ddc84;
+}
+
+.difference-status.over span {
+	color: #ff7b72;
+}
+
+/* MODO SUPERMERCADO */
+
+.shopping-mode-button {
+	min-height: 38px;
+	padding: 0 12px;
+
+	border: 1px solid #30363d;
+	border-radius: 12px;
+
+	background: #161b22;
+	color: #8b949e;
+
+	font-size: 11px;
+	font-weight: 700;
+
+	cursor: pointer;
+
+	transition:
+		background 0.2s ease,
+		border-color 0.2s ease,
+		color 0.2s ease;
+}
+
+.shopping-mode-button.active {
+	border-color: rgba(61, 220, 132, 0.35);
+
+	background: rgba(61, 220, 132, 0.1);
+	color: #3ddc84;
+}
+
+.products-section.shopping-mode {
+	padding-bottom: 100px;
+}
+
+/* PRODUCTOS EN MODO COMPRA */
+
+.shopping-product-card {
+	padding: 20px 16px;
+}
+
+.shopping-product-card .product-main {
+	align-items: flex-start;
+}
+
+.shopping-check {
+	width: 44px;
+	height: 44px;
+
+	border-width: 2px;
+
+	font-size: 20px;
+}
+
+.shopping-product-card .product-info h3 {
+	margin-top: 5px;
+
+	font-size: 20px;
+}
+
+.shopping-product-card .product-info > p {
+	font-size: 13px;
+}
+
+.shopping-price-editor {
+	margin-top: 14px;
+}
+
+.shopping-price-editor label {
+	display: block;
+
+	margin-bottom: 6px;
+
+	color: #8b949e;
+
+	font-size: 10px;
+	font-weight: 700;
+
+	letter-spacing: 0.4px;
+	text-transform: uppercase;
+}
+
+.shopping-price-input {
+	display: flex;
+	width: 100%;
+	max-width: 180px;
+	min-height: 46px;
+
+	align-items: center;
+
+	overflow: hidden;
+
+	border: 1px solid #30363d;
+	border-radius: 12px;
+
+	background: #0d1117;
+}
+
+.shopping-price-input:focus-within {
+	border-color: #3ddc84;
+
+	box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.08);
+}
+
+.shopping-price-input span {
+	padding-left: 13px;
+
+	color: #3ddc84;
+
+	font-size: 15px;
+	font-weight: 800;
+}
+
+.shopping-price-input input {
+	width: 100%;
+	min-width: 0;
+	height: 44px;
+
+	padding: 0 12px 0 6px;
+
+	border: none;
+	outline: none;
+
+	background: transparent;
+	color: #f0f6fc;
+
+	font-size: 18px;
+	font-weight: 700;
+}
+
+.shopping-price-input input::-webkit-inner-spin-button,
+.shopping-price-input input::-webkit-outer-spin-button {
+	margin: 0;
+	appearance: none;
+}
+
+.shopping-product-card.purchased {
+	opacity: 0.55;
+}

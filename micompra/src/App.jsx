@@ -31,8 +31,12 @@ function App() {
 	const [productName, setProductName] = useState("");
 	const [productQuantity, setProductQuantity] = useState(1);
 	const [productUnit, setProductUnit] = useState("unidad");
+
 	const [productPrice, setProductPrice] = useState("");
+	const [productActualPrice, setProductActualPrice] = useState("");
 	const [productCategory, setProductCategory] = useState("Otros");
+
+	const [isShoppingMode, setIsShoppingMode] = useState(false);
 
 	const [openProductMenuId, setOpenProductMenuId] = useState(null);
 	const [editingProductId, setEditingProductId] = useState(null);
@@ -48,6 +52,7 @@ function App() {
 		setProductQuantity(1);
 		setProductUnit("unidad");
 		setProductPrice("");
+		setProductActualPrice("");
 		setProductCategory("Otros");
 
 		setIsProductModalOpen(true);
@@ -70,7 +75,12 @@ function App() {
 			name: productName.trim(),
 			quantity: Math.max(Number(productQuantity) || 1, 0.01),
 			unit: productUnit,
+
 			price: productPrice ? Number(productPrice) : 0,
+
+			actualPrice:
+				productActualPrice !== "" ? Number(productActualPrice) : null,
+
 			category: productCategory,
 			purchased: false,
 		};
@@ -98,6 +108,9 @@ function App() {
 		setProductQuantity(product.quantity);
 		setProductUnit(product.unit);
 		setProductPrice(product.price || "");
+
+		setProductActualPrice(product.actualPrice ?? "");
+
 		setProductCategory(product.category);
 
 		setOpenProductMenuId(null);
@@ -132,6 +145,12 @@ function App() {
 									price: productPrice
 										? Number(productPrice)
 										: 0,
+
+									actualPrice:
+										productActualPrice !== ""
+											? Number(productActualPrice)
+											: null,
+
 									category: productCategory,
 								}
 							: product,
@@ -185,6 +204,31 @@ function App() {
 							? {
 									...product,
 									purchased: !product.purchased,
+								}
+							: product,
+					),
+				};
+			}),
+		);
+	}
+
+	function updateActualPrice(productId, value) {
+		setLists((currentLists) =>
+			currentLists.map((list) => {
+				if (list.id !== selectedListId) {
+					return list;
+				}
+
+				return {
+					...list,
+					products: (list.products || []).map((product) =>
+						product.id === productId
+							? {
+									...product,
+									actualPrice:
+										value === ""
+											? null
+											: Math.max(Number(value) || 0, 0),
 								}
 							: product,
 					),
@@ -338,10 +382,21 @@ function App() {
 		(product) => product.purchased,
 	).length;
 
-	const totalAmount = selectedProducts.reduce(
-		(sum, product) => sum + product.quantity * product.price,
+	const estimatedTotal = selectedProducts.reduce(
+		(sum, product) => sum + product.quantity * (product.price || 0),
 		0,
 	);
+
+	const actualTotal = selectedProducts.reduce(
+		(sum, product) =>
+			sum +
+			product.quantity * (product.actualPrice ?? product.price ?? 0),
+		0,
+	);
+
+	const totalDifference = actualTotal - estimatedTotal;
+
+	const totalAmount = actualTotal;
 
 	const selectedBudget = selectedList?.budget ?? null;
 
@@ -350,6 +405,46 @@ function App() {
 
 	const isOverBudget =
 		selectedBudget !== null && totalAmount > selectedBudget;
+
+	const budgetProgress =
+		selectedBudget !== null && selectedBudget > 0
+			? Math.min(Math.round((totalAmount / selectedBudget) * 100), 100)
+			: 0;
+
+	const today = new Date();
+
+	const currentYear = today.getFullYear();
+	const currentMonth = today.getMonth() + 1;
+
+	const currentMonthTotal = lists.reduce((total, list) => {
+		if (!list.date) {
+			return total;
+		}
+
+		const [year, month] = list.date.split("-").map(Number);
+
+		if (year !== currentYear || month !== currentMonth) {
+			return total;
+		}
+
+		const listTotal = (list.products || []).reduce((sum, product) => {
+			const effectivePrice = product.actualPrice ?? product.price ?? 0;
+
+			return sum + (Number(product.quantity) || 0) * effectivePrice;
+		}, 0);
+
+		return total + listTotal;
+	}, 0);
+
+	const activeListsCount = lists.filter((list) => {
+		const products = list.products || [];
+
+		if (products.length === 0) {
+			return true;
+		}
+
+		return products.some((product) => !product.purchased);
+	}).length;
 
 	if (selectedList) {
 		return (
@@ -361,6 +456,7 @@ function App() {
 							onClick={() => {
 								setSelectedListId(null);
 								setIsDetailMenuOpen(false);
+								setIsShoppingMode(false);
 							}}
 							aria-label="Volver"
 						>
@@ -371,6 +467,19 @@ function App() {
 							<span>{formatDate(selectedList.date)}</span>
 							<h1>{selectedList.name}</h1>
 						</div>
+
+						<button
+							className={`shopping-mode-button ${
+								isShoppingMode ? "active" : ""
+							}`}
+							onClick={() =>
+								setIsShoppingMode((current) => !current)
+							}
+						>
+							{isShoppingMode
+								? "✓ Modo compra"
+								: "🛒 Modo compra"}
+						</button>
 
 						<div className="detail-menu-wrapper">
 							<button
@@ -420,20 +529,46 @@ function App() {
 					<section className="detail-summary">
 						<div>
 							<span>Productos</span>
+
 							<strong>
 								{purchasedCount} / {selectedProducts.length}
 							</strong>
 						</div>
 
 						<div>
-							<span>Total</span>
-							<strong>{formatCurrency(totalAmount)}</strong>
+							<span>Estimado</span>
+
+							<strong>{formatCurrency(estimatedTotal)}</strong>
+						</div>
+
+						<div>
+							<span>Real</span>
+
+							<strong>{formatCurrency(actualTotal)}</strong>
+						</div>
+
+						<div
+							className={
+								totalDifference > 0
+									? "difference-status over"
+									: totalDifference < 0
+										? "difference-status under"
+										: "difference-status"
+							}
+						>
+							<span>Diferencia</span>
+
+							<strong>
+								{totalDifference > 0 ? "+" : ""}
+								{formatCurrency(totalDifference)}
+							</strong>
 						</div>
 
 						{selectedBudget !== null && (
 							<>
 								<div>
 									<span>Presupuesto</span>
+
 									<strong>
 										{formatCurrency(selectedBudget)}
 									</strong>
@@ -462,7 +597,48 @@ function App() {
 						)}
 					</section>
 
-					<section className="products-section">
+					{selectedBudget !== null && (
+						<section className="budget-progress-card">
+							<div className="budget-progress-header">
+								<span>Uso del presupuesto</span>
+
+								<strong>
+									{selectedBudget > 0
+										? Math.round(
+												(totalAmount / selectedBudget) *
+													100,
+											)
+										: 0}
+									%
+								</strong>
+							</div>
+
+							<div className="budget-progress-track">
+								<div
+									className={`budget-progress-bar ${
+										isOverBudget ? "over-budget" : ""
+									}`}
+									style={{
+										width: `${budgetProgress}%`,
+									}}
+								/>
+							</div>
+
+							<div className="budget-progress-footer">
+								<span>
+									{formatCurrency(totalAmount)} usados
+								</span>
+
+								<span>de {formatCurrency(selectedBudget)}</span>
+							</div>
+						</section>
+					)}
+
+					<section
+						className={`products-section ${
+							isShoppingMode ? "shopping-mode" : ""
+						}`}
+					>
 						{selectedProducts.length === 0 ? (
 							<div className="empty-products">
 								<div className="empty-icon">🛍️</div>
@@ -495,8 +671,18 @@ function App() {
 
 								<div className="products-list">
 									{selectedProducts.map((product) => {
-										const productTotal =
-											product.quantity * product.price;
+										const estimatedProductTotal =
+											product.quantity *
+											(product.price || 0);
+
+										const effectiveUnitPrice =
+											product.actualPrice ??
+											product.price ??
+											0;
+
+										const actualProductTotal =
+											product.quantity *
+											effectiveUnitPrice;
 
 										return (
 											<article
@@ -504,7 +690,7 @@ function App() {
 													product.purchased
 														? "purchased"
 														: ""
-												}`}
+												} ${isShoppingMode ? "shopping-product-card" : ""}`}
 												key={product.id}
 											>
 												<div className="product-main">
@@ -513,7 +699,7 @@ function App() {
 															product.purchased
 																? "checked"
 																: ""
-														}`}
+														} ${isShoppingMode ? "shopping-check" : ""}`}
 														onClick={() =>
 															togglePurchased(
 																product.id,
@@ -540,18 +726,79 @@ function App() {
 														<p>
 															{product.quantity}{" "}
 															{product.unit}
-															{product.price >
-																0 &&
-																` × ${formatCurrency(product.price)}`}
 														</p>
+
+														<div className="product-prices">
+															<span>
+																Est.{" "}
+																{formatCurrency(
+																	product.price ||
+																		0,
+																)}
+															</span>
+
+															{product.actualPrice !==
+																null &&
+																product.actualPrice !==
+																	undefined && (
+																	<span className="actual-price">
+																		Real{" "}
+																		{formatCurrency(
+																			product.actualPrice,
+																		)}
+																	</span>
+																)}
+														</div>
+														{isShoppingMode && (
+															<div className="shopping-price-editor">
+																<label
+																	htmlFor={`actual-price-${product.id}`}
+																>
+																	Precio real
+																</label>
+
+																<div className="shopping-price-input">
+																	<span>
+																		₡
+																	</span>
+
+																	<input
+																		id={`actual-price-${product.id}`}
+																		type="number"
+																		min="0"
+																		step="1"
+																		inputMode="numeric"
+																		placeholder="0"
+																		value={
+																			product.actualPrice ??
+																			""
+																		}
+																		onChange={(
+																			event,
+																		) =>
+																			updateActualPrice(
+																				product.id,
+																				event
+																					.target
+																					.value,
+																			)
+																		}
+																	/>
+																</div>
+															</div>
+														)}
 													</div>
 
 													<div className="product-actions">
-														<strong>
-															{formatCurrency(
-																productTotal,
-															)}
-														</strong>
+														<div className="product-total">
+															<span>Total</span>
+
+															<strong>
+																{formatCurrency(
+																	actualProductTotal,
+																)}
+															</strong>
+														</div>
 
 														<div className="product-menu-wrapper">
 															<button
@@ -727,24 +974,54 @@ function App() {
 										</div>
 									</div>
 
-									<div className="form-group">
-										<label htmlFor="product-price">
-											Precio unitario
-										</label>
+									<div className="product-form-grid">
+										<div className="form-group">
+											<label htmlFor="product-price">
+												Precio estimado
+											</label>
 
-										<input
-											id="product-price"
-											type="number"
-											min="0"
-											step="1"
-											value={productPrice}
-											onChange={(event) =>
-												setProductPrice(
-													event.target.value,
-												)
-											}
-											placeholder="Ej. 1150"
-										/>
+											<input
+												id="product-price"
+												type="number"
+												min="0"
+												step="1"
+												value={productPrice}
+												onChange={(event) =>
+													setProductPrice(
+														event.target.value,
+													)
+												}
+												placeholder="Ej. 1150"
+											/>
+
+											<span className="form-help">
+												Precio que esperas pagar.
+											</span>
+										</div>
+
+										<div className="form-group">
+											<label htmlFor="product-actual-price">
+												Precio real
+											</label>
+
+											<input
+												id="product-actual-price"
+												type="number"
+												min="0"
+												step="1"
+												value={productActualPrice}
+												onChange={(event) =>
+													setProductActualPrice(
+														event.target.value,
+													)
+												}
+												placeholder="Ej. 1250"
+											/>
+
+											<span className="form-help">
+												Precio pagado realmente.
+											</span>
+										</div>
 									</div>
 
 									<div className="form-group">
@@ -958,12 +1235,14 @@ function App() {
 			<section className="summary">
 				<div>
 					<span>Este mes</span>
-					<strong>{formatCurrency(0)}</strong>
+
+					<strong>{formatCurrency(currentMonthTotal)}</strong>
 				</div>
 
 				<div>
 					<span>Listas activas</span>
-					<strong>{lists.length}</strong>
+
+					<strong>{activeListsCount}</strong>
 				</div>
 			</section>
 
@@ -1008,11 +1287,16 @@ function App() {
 								(product) => product.purchased,
 							).length;
 
-							const total = products.reduce(
-								(sum, product) =>
-									sum + product.quantity * product.price,
-								0,
-							);
+							const total = products.reduce((sum, product) => {
+								const effectivePrice =
+									product.actualPrice ?? product.price ?? 0;
+
+								return (
+									sum +
+									(Number(product.quantity) || 0) *
+										effectivePrice
+								);
+							}, 0);
 
 							const progress =
 								products.length > 0
