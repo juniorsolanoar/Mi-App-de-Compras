@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
+
+import { initializeDatabase, saveListsToDatabase } from "./db";
+
 import "./App.css";
 
 function App() {
-	const [lists, setLists] = useState(() => {
-		try {
-			const savedLists = localStorage.getItem("micompra-lists");
+	const [lists, setLists] = useState([]);
 
-			return savedLists ? JSON.parse(savedLists) : [];
-		} catch {
-			return [];
-		}
-	});
+	const [isDataLoaded, setIsDataLoaded] = useState(false);
+
 	const [isModalOpen, setIsModalOpen] = useState(false);
 	const [selectedListId, setSelectedListId] = useState(null);
 
@@ -46,8 +44,64 @@ function App() {
 	const [activeView, setActiveView] = useState("lists");
 
 	useEffect(() => {
-		localStorage.setItem("micompra-lists", JSON.stringify(lists));
-	}, [lists]);
+		let cancelled = false;
+
+		async function loadData() {
+			try {
+				const storedLists = await initializeDatabase();
+
+				if (!cancelled) {
+					setLists(storedLists);
+				}
+			} catch (error) {
+				console.error("Error cargando MiCompra:", error);
+
+				if (!cancelled) {
+					window.alert("No fue posible cargar los datos guardados.");
+				}
+			} finally {
+				if (!cancelled) {
+					setIsDataLoaded(true);
+				}
+			}
+		}
+
+		loadData();
+
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!isDataLoaded) {
+			return;
+		}
+
+		async function persistData() {
+			try {
+				await saveListsToDatabase(lists);
+			} catch (error) {
+				console.error("Error guardando MiCompra:", error);
+			}
+		}
+
+		persistData();
+	}, [lists, isDataLoaded]);
+
+	if (!isDataLoaded) {
+		return (
+			<main className="app">
+				<div className="database-loading">
+					<div className="database-loading-icon">🛒</div>
+
+					<strong>MiCompra</strong>
+
+					<span>Cargando tus compras...</span>
+				</div>
+			</main>
+		);
+	}
 
 	function openProductModal() {
 		setEditingProductId(null);
@@ -470,6 +524,90 @@ function App() {
 			maximumFractionDigits: 0,
 		}).format(value);
 	}
+
+	function exportBackup() {
+		const backup = {
+			app: "MiCompra",
+			version: 1,
+			exportedAt: new Date().toISOString(),
+
+			data: {
+				lists,
+			},
+		};
+
+		const json = JSON.stringify(backup, null, 2);
+
+		const blob = new Blob([json], {
+			type: "application/json",
+		});
+
+		const url = URL.createObjectURL(blob);
+
+		const link = document.createElement("a");
+
+		const today = getTodayDate();
+
+		link.href = url;
+		link.download = `micompra-backup-${today}.json`;
+
+		document.body.appendChild(link);
+
+		link.click();
+
+		document.body.removeChild(link);
+
+		URL.revokeObjectURL(url);
+	}
+
+	function importBackup(event) {
+		const file = event.target.files?.[0];
+
+		if (!file) {
+			return;
+		}
+
+		const reader = new FileReader();
+
+		reader.onload = () => {
+			try {
+				const backup = JSON.parse(reader.result);
+
+				if (
+					backup?.app !== "MiCompra" ||
+					!Array.isArray(backup?.data?.lists)
+				) {
+					window.alert(
+						"El archivo seleccionado no parece ser una copia válida de MiCompra.",
+					);
+
+					return;
+				}
+
+				const confirmed = window.confirm(
+					`Se encontraron ${backup.data.lists.length} listas. Al importar esta copia se reemplazarán los datos actuales. ¿Deseas continuar?`,
+				);
+
+				if (!confirmed) {
+					return;
+				}
+
+				setLists(backup.data.lists);
+
+				setSelectedListId(null);
+				setActiveView("lists");
+
+				window.alert("La copia de seguridad se importó correctamente.");
+			} catch {
+				window.alert("No fue posible leer la copia de seguridad.");
+			} finally {
+				event.target.value = "";
+			}
+		};
+
+		reader.readAsText(file);
+	}
+
 	const selectedList = lists.find((list) => list.id === selectedListId);
 
 	const isSelectedListCompleted = Boolean(selectedList?.completedAt);
@@ -573,6 +711,82 @@ function App() {
 	const completedLists = lists
 		.filter((list) => Boolean(list.completedAt))
 		.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+
+	const completedListsThisMonth = completedLists.filter((list) => {
+		const completedDate = new Date(list.completedAt);
+
+		return (
+			completedDate.getFullYear() === currentYear &&
+			completedDate.getMonth() + 1 === currentMonth
+		);
+	});
+
+	const monthlyActualSpent = completedListsThisMonth.reduce((total, list) => {
+		const listTotal = (list.products || []).reduce((sum, product) => {
+			if (!product.purchased) {
+				return sum;
+			}
+
+			if (
+				product.actualPrice === null ||
+				product.actualPrice === undefined
+			) {
+				return sum;
+			}
+
+			return sum + (Number(product.quantity) || 0) * product.actualPrice;
+		}, 0);
+
+		return total + listTotal;
+	}, 0);
+
+	const monthlyComparableEstimated = completedListsThisMonth.reduce(
+		(total, list) => {
+			const listTotal = (list.products || []).reduce((sum, product) => {
+				if (!product.purchased) {
+					return sum;
+				}
+
+				if (
+					product.actualPrice === null ||
+					product.actualPrice === undefined
+				) {
+					return sum;
+				}
+
+				return (
+					sum + (Number(product.quantity) || 0) * (product.price || 0)
+				);
+			}, 0);
+
+			return total + listTotal;
+		},
+		0,
+	);
+
+	const monthlyDifference = monthlyActualSpent - monthlyComparableEstimated;
+
+	const monthlyAverage =
+		completedListsThisMonth.length > 0
+			? monthlyActualSpent / completedListsThisMonth.length
+			: 0;
+
+	const monthlyMissingPrices = completedListsThisMonth.reduce(
+		(total, list) =>
+			total +
+			(list.products || []).filter(
+				(product) =>
+					product.purchased &&
+					(product.actualPrice === null ||
+						product.actualPrice === undefined),
+			).length,
+		0,
+	);
+
+	const currentMonthLabel = new Intl.DateTimeFormat("es-CR", {
+		month: "long",
+		year: "numeric",
+	}).format(today);
 
 	if (selectedList) {
 		return (
@@ -1574,12 +1788,298 @@ function App() {
 						Historial
 					</button>
 
-					<button className="nav-item">
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("stats")}
+					>
 						<span>📊</span>
 						Estadísticas
 					</button>
 
-					<button className="nav-item">
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("settings")}
+					>
+						<span>⚙️</span>
+						Ajustes
+					</button>
+				</nav>
+			</main>
+		);
+	}
+
+	if (activeView === "stats") {
+		return (
+			<main className="app">
+				<header className="header">
+					<div>
+						<span className="eyebrow">RESUMEN DE COMPRAS</span>
+
+						<h1>Estadísticas</h1>
+					</div>
+				</header>
+
+				<section className="stats-period">
+					<span>Periodo actual</span>
+
+					<strong>{currentMonthLabel}</strong>
+				</section>
+
+				<section className="stats-grid">
+					<article className="stats-card stats-card-main">
+						<span>Gastado este mes</span>
+
+						<strong>{formatCurrency(monthlyActualSpent)}</strong>
+
+						<small>En compras finalizadas</small>
+					</article>
+
+					<article className="stats-card">
+						<span>Compras</span>
+
+						<strong>{completedListsThisMonth.length}</strong>
+
+						<small>Finalizadas este mes</small>
+					</article>
+
+					<article className="stats-card">
+						<span>Promedio por compra</span>
+
+						<strong>{formatCurrency(monthlyAverage)}</strong>
+
+						<small>Gasto promedio</small>
+					</article>
+
+					<article
+						className={`stats-card ${
+							monthlyDifference > 0
+								? "stats-over"
+								: monthlyDifference < 0
+									? "stats-under"
+									: ""
+						}`}
+					>
+						<span>Diferencia vs estimado</span>
+
+						<strong>
+							{monthlyDifference > 0 ? "+" : ""}
+							{formatCurrency(monthlyDifference)}
+						</strong>
+
+						<small>
+							{monthlyDifference > 0
+								? "Gastaste más de lo estimado"
+								: monthlyDifference < 0
+									? "Gastaste menos de lo estimado"
+									: "Según lo estimado"}
+						</small>
+					</article>
+				</section>
+
+				{monthlyMissingPrices > 0 && (
+					<div className="stats-warning">
+						<span>⚠️</span>
+
+						<p>
+							{monthlyMissingPrices === 1
+								? "Hay 1 producto sin precio real. Las estadísticas pueden estar incompletas."
+								: `Hay ${monthlyMissingPrices} productos sin precio real. Las estadísticas pueden estar incompletas.`}
+						</p>
+					</div>
+				)}
+
+				{completedListsThisMonth.length === 0 && (
+					<section className="empty-state stats-empty">
+						<div className="empty-icon">📊</div>
+
+						<h3>Aún no hay estadísticas</h3>
+
+						<p>
+							Finaliza una compra para comenzar a ver información
+							sobre tus gastos.
+						</p>
+					</section>
+				)}
+
+				<nav className="bottom-navigation">
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("lists")}
+					>
+						<span>🛒</span>
+						Listas
+					</button>
+
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("history")}
+					>
+						<span>🕘</span>
+						Historial
+					</button>
+
+					<button className="nav-item active">
+						<span>📊</span>
+						Estadísticas
+					</button>
+
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("settings")}
+					>
+						<span>⚙️</span>
+						Ajustes
+					</button>
+				</nav>
+			</main>
+		);
+	}
+
+	if (activeView === "settings") {
+		return (
+			<main className="app">
+				<header className="header">
+					<div>
+						<span className="eyebrow">PREFERENCIAS</span>
+
+						<h1>Ajustes</h1>
+					</div>
+				</header>
+
+				<section className="settings-section">
+					<div className="settings-section-header">
+						<span>DATOS</span>
+
+						<h2>Copia de seguridad</h2>
+
+						<p>
+							Protege tus listas y compras guardando una copia de
+							tus datos.
+						</p>
+					</div>
+
+					<div className="settings-card">
+						<button
+							className="settings-action"
+							onClick={exportBackup}
+						>
+							<div className="settings-action-icon">📤</div>
+
+							<div className="settings-action-content">
+								<strong>Exportar copia</strong>
+
+								<span>
+									Guarda todas tus listas en un archivo JSON.
+								</span>
+							</div>
+
+							<span className="settings-arrow">›</span>
+						</button>
+
+						<div className="settings-divider" />
+
+						<label className="settings-action">
+							<div className="settings-action-icon">📥</div>
+
+							<div className="settings-action-content">
+								<strong>Importar copia</strong>
+
+								<span>
+									Restaura MiCompra desde un respaldo.
+								</span>
+							</div>
+
+							<span className="settings-arrow">›</span>
+
+							<input
+								className="settings-file-input"
+								type="file"
+								accept=".json,application/json"
+								onChange={importBackup}
+							/>
+						</label>
+					</div>
+				</section>
+
+				<section className="settings-section">
+					<div className="settings-section-header">
+						<span>ALMACENAMIENTO</span>
+
+						<h2>Datos locales</h2>
+					</div>
+
+					<div className="settings-info-card">
+						<div>
+							<span>Motor actual</span>
+							<strong>IndexedDB</strong>
+						</div>
+
+						<div>
+							<span>Listas guardadas</span>
+							<strong>{lists.length}</strong>
+						</div>
+
+						<div>
+							<span>Versión de datos</span>
+							<strong>2</strong>
+						</div>
+					</div>
+				</section>
+
+				<section className="settings-section settings-last-section">
+					<div className="settings-section-header">
+						<span>PRÓXIMAMENTE</span>
+
+						<h2>Preferencias</h2>
+					</div>
+
+					<div className="settings-info-card">
+						<div>
+							<span>Moneda</span>
+							<strong>CRC · ₡</strong>
+						</div>
+
+						<div>
+							<span>Tema</span>
+							<strong>Oscuro</strong>
+						</div>
+
+						<div>
+							<span>Formato regional</span>
+							<strong>Costa Rica</strong>
+						</div>
+					</div>
+				</section>
+
+				<nav className="bottom-navigation">
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("lists")}
+					>
+						<span>🛒</span>
+						Listas
+					</button>
+
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("history")}
+					>
+						<span>🕘</span>
+						Historial
+					</button>
+
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("stats")}
+					>
+						<span>📊</span>
+						Estadísticas
+					</button>
+
+					<button
+						className="nav-item"
+						onClick={() => setActiveView("settings")}
+					>
 						<span>⚙️</span>
 						Ajustes
 					</button>
@@ -1596,7 +2096,11 @@ function App() {
 					<h1>MiCompra</h1>
 				</div>
 
-				<button className="icon-button" aria-label="Ajustes">
+				<button
+					className="icon-button"
+					aria-label="Ajustes"
+					onClick={() => setActiveView("settings")}
+				>
 					⚙️
 				</button>
 			</header>
@@ -1818,12 +2322,18 @@ function App() {
 					Historial
 				</button>
 
-				<button className="nav-item">
+				<button
+					className="nav-item"
+					onClick={() => setActiveView("stats")}
+				>
 					<span>📊</span>
 					Estadísticas
 				</button>
 
-				<button className="nav-item">
+				<button
+					className="nav-item"
+					onClick={() => setActiveView("settings")}
+				>
 					<span>⚙️</span>
 					Ajustes
 				</button>
